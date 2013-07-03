@@ -81,6 +81,23 @@
         }
     };
 
+    /**
+     * Easier way to create a list of String properties
+     */
+    Backprop.create_strings = function(proto, names) {
+        if (arguments.length === 2) {
+            // support for array form
+            for (var n in names) {
+                Backprop.create(proto, n, {coerce: String});
+            }
+        } else if (arguments.length > 2) {
+            // support for varargs form
+            for (var i = 1; i < arguments.length; i++) {
+                Backprop.create(proto, arguments[i], {coerce: String});
+            }
+        }
+    };
+
     // Monkeypatch Backbone to do two things:
     //  * Add a new Backbone.property function, used to set up properties on models
     //  * Replace Backbone.Model.extend with a version that parses property definitions
