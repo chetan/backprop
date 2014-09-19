@@ -1,21 +1,22 @@
 var assert = require('assert');
 var Backbone = require('backbone');
-
 var Backprop = require('../backprop');
 
-describe('Backprop monkeypatch', function() {
-    it('creates Backbone.property()', function() {
-        Backprop.monkeypatch(Backbone);
-        assert.equal(typeof Backbone.property, 'function');
+
+describe('Backprop extendModel', function() {
+    it('extends Backbone.Model and returns a new Model class', function() {
+        var baseModel = Backprop.extendModel(Backbone.Model);
+        assert.equal(baseModel, Backprop.Model);
     });
 });
 
 
 describe('A created model property', function() {
-    Backprop.monkeypatch(Backbone);
-    var M = Backbone.Model.extend({
-        name: Backbone.property({ default: 'asdf', trim: true }),
-        status: Backbone.property(),
+    Backprop.extendModel(Backbone.Model);
+    var M = Backprop.Model.extend({
+        name: Backprop.String({ default: 'asdf', trim: true }),
+        status: Backprop.String(),
+        isAvailable: Backprop.Boolean({ default: false }),
 
         doStuff: function() {}
     });
@@ -24,6 +25,12 @@ describe('A created model property', function() {
         var m = new M();
         assert.equal(m.name, 'asdf');
         assert.equal(m.attributes.name, 'asdf');
+    });
+
+    it('has a working default even if it is falsy', function() {
+        var m = new M();
+        assert.strictEqual(m.isAvailable, false);
+        assert.strictEqual(m.attributes.isAvailable, false);
     });
 
     it('is writable', function() {
@@ -44,9 +51,7 @@ describe('A created model property', function() {
 
     it('throws if their name is already in use by Backbone', function() {
         assert.throws(function() {
-            var M2 = Backbone.Model.extend({
-                get: Backbone.property()
-            });
+            Backprop.Model.extend({ get: Backprop.Generic() });
         }, Error);
     });
 
@@ -85,11 +90,11 @@ describe('A created model property', function() {
 
 
 describe('Property choice option', function() {
-    Backprop.monkeypatch(Backbone);
-    var M = Backbone.Model.extend({
-        category: Backbone.property({ choices: ['books', 'electronics', 'music'] }),
-        genre: Backbone.property({ choices: ['action', 'comedy'], default: 'action' }),
-        price: Backbone.property({ coerce: Number, choices: [0.99, 1.50, '9.99'] }),
+    Backprop.extendModel(Backbone.Model);
+    var M = Backprop.Model.extend({
+        category: Backprop.String({ choices: ['books', 'electronics', 'music'] }),
+        genre: Backprop.String({ choices: ['action', 'comedy'], default: 'action' }),
+        price: Backprop.Number({ choices: [0.99, 1.50, '9.99'] }),
     });
 
     it('works with strings', function() {
@@ -125,13 +130,101 @@ describe('Property choice option', function() {
 });
 
 
+describe('setProperties() method', function() {
+    Backprop.extendModel(Backbone.Model);
+
+    var categoryConfig = { choices: ['books', 'electronics', 'music'] };
+    var genreConfig = { choices: ['action', 'comedy'], default: 'action' };
+    var priceConfig = { coerce: Number, choices: [0.95, 1.50, '9.99'] };
+
+    var M = Backprop.Model.extend({
+        category: Backprop.String(categoryConfig),
+        genre: Backprop.String(genreConfig),
+        price: Backprop.Number(priceConfig),
+    });
+
+    it('sets values on model instances', function() {
+        var m = new M;
+        m.setProperties({ category: 'books', genre: 'comedy' });
+        assert.strictEqual(m.category, 'books');
+        assert.strictEqual(m.attributes.category, 'books');
+
+        assert.strictEqual(m.genre, 'comedy');
+        assert.strictEqual(m.attributes.genre, 'comedy');
+    });
+
+    it('applies property transforms before setting', function() {
+        var m = new M;
+        m.setProperties({ price: 1.23 });
+        assert.strictEqual(m.price, undefined);
+        assert.strictEqual(m.attributes.price, undefined);
+    });
+
+    it('has access to a _schema property on the constructor', function() {
+        assert.strictEqual(M._schema.category, categoryConfig);
+        assert.strictEqual(M._schema.genre, genreConfig);
+        assert.strictEqual(M._schema.price, priceConfig);
+    });
+
+    it('works with { validate: true }', function() {
+        var m = new M;
+        var count = 0;
+        M.prototype.validate = function() { count++; };
+
+        // validate() is called if { validate: true } is passed:
+        m.setProperties({ category: 'electronics' }, { validate: true });
+        assert.strictEqual(count, 1);
+        assert.strictEqual(m.category, 'electronics');
+
+        // validate() is not called if { validate: true } is NOT passed:
+        m.setProperties({ category: 'electronics' }, {});
+        assert.strictEqual(count, 1);
+    });
+
+    it('works with { silent: true }', function() {
+        var m = new M;
+        var count = 0;
+
+        m.on('change', function() { count++; });
+        m.setProperties({ category: 'electronics' });
+        assert.strictEqual(count, 1);
+
+        m.setProperties({ category: 'electronics' }, { silent: true });
+        assert.strictEqual(count, 1);
+    });
+
+    it('works with { silent: true } for granular change listeners', function() {
+        var m = new M;
+        var count = 0;
+
+        m.on('change:genre', function() { count++; });
+        m.setProperties({ genre: 'comedy' });
+        assert.strictEqual(count, 1);
+        m.setProperties({ genre: 'action' }, { silent: true });
+        assert.strictEqual(count, 1);
+    });
+
+    it('allows unspecified properties through as regular Backbone attrs', function() {
+        var m = new M;
+        m.setProperties({ foo: 'baz' });
+        assert.strictEqual(m.get('foo'), 'baz');
+
+        // Mixed example:
+        m.setProperties({ price: 0.95, x: 23 });
+        assert.strictEqual(m.price, 0.95);
+        assert.strictEqual(m.get('x'), 23);
+    });
+});
+
+
 describe('Max and min', function() {
-    Backprop.monkeypatch(Backbone);
-    var M = Backbone.Model.extend({
-        myNum: Backbone.property({ coerce: Number, min: 100, max: 200 }),
-        minOnly: Backbone.property({ coerce: Number, min: 100 }),
-        maxOnly: Backbone.property({ coerce: Number, max: 200 }),
-        strTest: Backbone.property({ coerce: String, min: 'c', max: 'f' }),
+    Backprop.extendModel(Backbone.Model);
+
+    var M = Backprop.Model.extend({
+        myNum: Backprop.Number({ min: 100, max: 200 }),
+        minOnly: Backprop.Number({ min: 100 }),
+        maxOnly: Backprop.Number({ max: 200 }),
+        strTest: Backprop.String({ min: 'c', max: 'f' }),
     });
 
     it('work when both are specified', function() {
@@ -167,12 +260,12 @@ describe('Max and min', function() {
 
 
 describe('Property type coercion', function() {
-    Backprop.monkeypatch(Backbone);
-    var M = Backbone.Model.extend({
-        myString: Backbone.property({ coerce: String }),
-        myNum: Backbone.property({ coerce: Number }),
-        myBool: Backbone.property({ coerce: Boolean }),
-        myInt: Backbone.property({ coerce: parseInt }),
+    Backprop.extendModel(Backbone.Model);
+    var M = Backprop.Model.extend({
+        myString: Backprop.String(),
+        myNum: Backprop.Number(),
+        myBool: Backprop.Boolean(),
+        myInt: Backprop.Integer()
     });
 
     it('works for numbers', function() {
@@ -240,5 +333,90 @@ describe('Property type coercion', function() {
         m.myInt = 'asdfasdf 14';
         assert.ok(isNaN(m.myInt));
         assert.ok(isNaN(m.attributes.myInt));
+    });
+});
+
+
+describe('Shorthand properties', function() {
+    Backprop.extendModel(Backbone.Model);
+    var M = Backprop.Model.extend({
+        name: Backprop.String({ default: 'asdf', trim: true }),
+        age: Backprop.Number({ coerce: function(x) { return x + 1; } }),
+        likes: Backprop.Integer(),
+        isAdmin: Backprop.Boolean({ default: false }),
+    });
+
+    it('are readable with working defaults', function() {
+        var m = new M();
+        assert.strictEqual(m.name, 'asdf');
+        assert.strictEqual(m.attributes.name, 'asdf');
+
+        assert.strictEqual(m.isAdmin, false);
+        assert.strictEqual(m.attributes.isAdmin, false);
+    });
+
+    it('are writable', function() {
+        var m = new M();
+        m.name = 'foo';
+        assert.strictEqual(m.name, 'foo');
+        assert.strictEqual(m.attributes.name, 'foo');
+
+        m.isAdmin = true;
+        assert.strictEqual(m.isAdmin, true);
+        assert.strictEqual(m.attributes.isAdmin, true);
+    });
+
+    it('apply the the coerce function after type casting', function() {
+        var m = new M();
+        m.age = '27';
+        // Coerce function adds one to the given number:
+        assert.strictEqual(m.age, 28);
+        assert.strictEqual(m.attributes.age, 28);
+    });
+
+    it('works for Backprop.Integer', function() {
+        var m = new M();
+        m.likes = '27.34';
+        assert.strictEqual(m.likes, 27);
+        assert.strictEqual(m.attributes.likes, 27);
+    });
+
+    it('works for Backprop.Generic', function() {
+        var M2 = Backprop.Model.extend({
+            foo: Backprop.Generic()
+        });
+
+        // Ensure that Backprop.Generic properties will accept any type.
+        var m = new M2();
+        m.foo = '27.34';
+        assert.strictEqual(m.foo, '27.34');
+        assert.strictEqual(m.attributes.foo, '27.34');
+
+        m.foo = 23;
+        assert.strictEqual(m.foo, 23);
+        assert.strictEqual(m.attributes.foo, 23);
+    });
+
+    it('works for Backprop.Date', function() {
+        var M2 = Backprop.Model.extend({
+            createdAt: Backprop.Date()
+        });
+
+        var m = new M2();
+
+        // Assignment to a Date object is OK:
+        var d = new Date;
+        m.createdAt = d;
+        assert.strictEqual(m.createdAt.constructor, Date);
+        assert.strictEqual(m.createdAt.toString(), d.toString());
+        assert.strictEqual(m.attributes.createdAt.toString(), d.toString());
+
+        // Assignment to a Unix timestamp (in milliseconds) is also OK:
+        d = new Date(1e9);
+        m.createdAt = 1e9;
+        assert.strictEqual(m.createdAt.constructor, Date);
+        assert.strictEqual(m.createdAt.getYear(), 70);
+        assert.strictEqual(m.createdAt.toString(), d.toString());
+        assert.strictEqual(m.attributes.createdAt.toString(), d.toString());
     });
 });

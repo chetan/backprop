@@ -11,14 +11,14 @@ mymodel.set('name', 'Bob');
 console.log(mymodel.get('name'));   // prints 'Bob'
 ```
 
-with Backprop you can write this instead (and it will have the same effect):
+with Backprop you can write this instead (and it will have the same effect, provided you have set up a `name` property):
 
 ```js
 mymodel.name = 'Fred';
 console.log(mymodel.name);              // prints 'Fred'
 ```
 
-Backbone's `get()` and `set()` will still work if you need them (eg. using `set()` with `{validate: true}`).
+Backbone's `get()` and `set()` will still work if you need them. For example, you could use `set()` for it's `{validate: true}` option, although Backprop also provides a `setProperties()` method that accepts the same options as `set()` (see below).
 
 You can install Backprop from npm with `npm install backprop`.
 
@@ -28,22 +28,19 @@ You can install Backprop from npm with `npm install backprop`.
 Usage
 -----
 
-Initialize the plugin with:
+To use the plugin, add the following line to your app's initial config:
 
 ```js
-Backprop.monkeypatch(Backbone);
+Backprop.extendModel(Backbone.Model);
 ```
 
-This will replace Backbone.Model.extend with a version that creates the properties,
-and creates `Backbone.property`, a function that you can use to define properties
-on your models.
-
-Then in your models write something like:
+Then use Backprop.Model.extend (rather than Backbone's version) to create
+your models, with declarative properties in the model definition. For example:
 
 ```js
-var User = Backbone.Model.extend({
-    name: Backbone.property({ coerce: String }),
-    numFollowers: Backbone.property({ default: 0, coerce: Number });
+var User = Backprop.Model.extend({
+    name: Backprop.String(),
+    numFollowers: Backprop.Number({ default: 0 })
 });
 ```
 
@@ -54,10 +51,32 @@ module systems like Browserify:
 var Backprop = require('backprop');
 ```
 
-Backbone.property() arguments
------------------------------
+Defining Properties
+-------------------
 
-Backbone.property takes an optional hash as its only argument. The following
+Backprop ships with a number of functions that can be used to create properties
+in your model definition:
+
+* `Backprop.String` => ensures the property value is a string
+* `Backprop.Boolean` => ensures the property value is a boolean
+* `Backprop.Number` => ensures the property value is a Javascript Number
+* `Backprop.Integer` => uses parseInt(x, 10) to ensure the value is an integer.
+                        Note that Javascript can only safely represent [integers
+                        between -2^53 and 2^53](http://www.2ality.com/2013/10/safe-integers.html).
+* `Backprop.Date` => calls `new Date(x)`, passing in the assigned value as x.
+                     With these properties you can assign a Date instance, Unix
+                     timestamp (in milliseconds), or date string.
+* `Backprop.Generic` => Performs no type coercion (you can provide your own `coerce` though)
+
+**Note!** Previous versions of Backprop used `Backbone.property()` for defining
+properties. This is no longer supported– `Backprop.Generic()` is a drop-in
+replacement for these older property definitions.
+
+
+Property Arguments
+------------------
+
+Each property function takes an optional hash as its only argument. The following
 keys are supported to pre-filter data and make dealing with properties a bit more pleasant:
 
 ##### `default`
@@ -66,30 +85,28 @@ was set in the model's `defaults` hash for this attribute name. It's basically j
 shorthand so you can keep your default value close to the property definition.
 
 ##### `coerce`
-Specify a function that transforms the property's value before it is set. Some useful
-Javascript functions to pass in here include `String`, `Number`, `Boolean`, `parseInt`,
-(although you might want to wrap it to make sure its second argument is 10), `parseFloat`,
-and `encodeURIComponent`. Of course, you can also provide your own.
+Specify a function that transforms the property’s value before it is set.
+You could pass in a browser built-in like `encodeURIComponent`, or define
+your own function. If you defined your property with a type-coercing function
+like `Backprop.String()`, note that the type coercion will happen before your
+`coerce` function sees the value.
 
 For example:
 
 ```
-var Cat = Backbone.Model.extend({
-    name: Backbone.property({ coerce: String }),
-    lives: Backbone.property({ coerce: Number })
+var Cat = Backprop.Model.extend({
+    lives: Backprop.Number({ coerce: function(x) { return x*9; })
 });
+
 var c = new Cat;
-
-c.name = 42;
-console.log(c.name === '42')    // prints true
-
-c.lives = '9';
-console.log(c.lives === 9)      // prints true
+c.lives = '2';
+console.log(c.lives === 18)      // prints true
 ```
 
 ##### `trim`
 If true, calls a trim method on the value before setting the attribute. This is
-handy for removing leading/trailing whitespace from strings.
+handy for removing leading/trailing whitespace from strings. For obvious reasons,
+you probably only want to use this with `Backprop.String()`.
 
 
 ##### `max` and `min`
@@ -97,8 +114,8 @@ Specify values that the value must be less than/greater than (these can be used 
 or together). Most useful for numbers, but will work with any values that work with `<` and `>`.
 
 ```js
-var Beer = Backbone.Model.extend({
-    milliliters = Backbone.property({ coerce: Number, min: 330, max: 1000 })
+var Beer = Backprop.Model.extend({
+    milliliters = Backprop.Number({ min: 330, max: 1000 })
 });
 var b = new Beer;
 
@@ -119,9 +136,9 @@ not in the array is assigned to the property, the value set to the model will be
     c) `undefined`
 
 ```js
-var Beer = Backbone.Model.extend({
-    style: Backbone.property({ choices: ['IPA', 'stout', 'ESB'], default: 'IPA' });
-    type: Backbone.property({ choices: ['on_tap', 'bottle'] });
+var Beer = Backprop.Model.extend({
+    style: Backprop.String({ choices: ['IPA', 'stout', 'ESB'], default: 'IPA' }),
+    type: Backprop.String({ choices: ['on_tap', 'bottle'] })
 });
 
 var b = new Beer;
@@ -138,6 +155,24 @@ console.log(b.type);           // prints 'on_tap'
 b.type = 'foooo';
 console.log(b.type);           // prints 'on_tap'
 ```
+
+The setProperties method
+------------------------
+
+Backprop also adds a `setProperties()` method to model instances. This
+method accepts two positional arguments: the first is a hash of properties to set, and the
+second is an options object that is passed to Backbone's `set()` method behind the scenes.
+The second argument can be used to pass `{ validate: true }` or `{ silent: true }` for your
+properties, while still having the data passed through Backprop's pre-filters (eg. `choices`,
+`max`, `min`, etc).
+
+```
+var b = new Beer;
+b.setProperties({ style: 'ESB', type: 'on_tap' }, { silent: true });
+```
+
+Note that if you pass any keys in `setProperties()`'s first hash that are not defined as
+properties, they will be set on the model as regular Backbone attributes.
 
 
 Compatibility
@@ -157,6 +192,16 @@ git clone git://github.com/af/backprop.git
 cd backprop
 npm test
 ```
+
+
+Changelog
+---------
+* `0.4.0` - Removed Backbone.property() and Backprop.monkeypatch(). Use
+            Backprop.extendModel(Backbone.Model) instead of the latter.
+* `0.3.0` - Added property shorthands like Backprop.Number, Backprop.String, etc
+* `0.2.0` - Added Backbone.Model.prototype.setProperties()
+* `0.1.0` - Initial release
+
 
 Credits
 -------
